@@ -4,7 +4,7 @@ import ChatWindow from "./components/ChatWindow.vue";
 
 <template>
   <div class="title-container">
-    <h1 class="split-title">Split</h1>
+    <h1 class="split-title">Project Split</h1>
   </div>
   <ChatWindow />
   <!-- Use the ChatWindow component here -->
@@ -17,9 +17,9 @@ import ChatWindow from "./components/ChatWindow.vue";
 }
 
 .split-title {
-  font-size: 10rem;
+  font-size: 3rem;
   font-weight: bold;
-  color: white; 
+  color: white;
   text-transform: uppercase;
   position: relative;
   display: inline-block;

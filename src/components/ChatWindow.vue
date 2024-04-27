@@ -1,5 +1,6 @@
 <template>
   <div class="chat-window">
+    <h2>PERSONALITY</h2>
     <div>
       <label>
         <input type="radio" value="normalo" v-model="responseMode" /> Normalo
@@ -13,8 +14,8 @@
         Faul
       </label>
       <label>
-        <input type="radio" value="kreativo" v-model="responseMode" />
-        Kreativo
+        <input type="radio" value="kreativa" v-model="responseMode" />
+        Kreativa
       </label>
       <label>
         <input type="radio" value="donGiovanni" v-model="responseMode" />
@@ -25,142 +26,227 @@
         Bateman
       </label>
       <label>
+        <input type="radio" value="catWoman" v-model="responseMode" />
+        Cat Woman
+      </label>
+      <label>
         <input type="radio" value="random" v-model="responseMode" />
         Random
       </label>
     </div>
-    <ul>
+    <h2>ATMOSPHERE OF THE CONVERSATION</h2>
+    <div>
+      <label>
+        <input type="radio" value="normal" v-model="conversationalAtmosphere" />
+        Normal
+      </label>
+      <label>
+        <input
+          type="radio"
+          value="consensus"
+          v-model="conversationalAtmosphere"
+        />
+        Consensus
+      </label>
+      <label>
+        <input
+          type="radio"
+          value="disagreement"
+          v-model="conversationalAtmosphere"
+        />
+        Disagreement
+      </label>
+      <label>
+        <input type="radio" value="love" v-model="conversationalAtmosphere" />
+        Love
+      </label>
+      <label>
+        <input type="radio" value="hate" v-model="conversationalAtmosphere" />
+        Hate
+      </label>
+      <label>
+        <input type="radio" value="ironic" v-model="conversationalAtmosphere" />
+        Ironic
+      </label>
+      <label>
+        <input
+          type="radio"
+          value="serious"
+          v-model="conversationalAtmosphere"
+        />
+        Serious
+      </label>
+      <label>
+        <input type="radio" value="formal" v-model="conversationalAtmosphere" />
+        Formal
+      </label>
+      <label>
+        <input
+          type="radio"
+          value="disrespectful"
+          v-model="conversationalAtmosphere"
+        />
+        Disrespectful
+      </label>
+    </div>
+    <ul class="chat-messages">
       <li
         v-for="(entry, index) in conversationHistory"
         :key="index"
-        :class="{
-          user: entry.source === 'user',
-          response: entry.source === 'response',
+        class="chat-message"
+        :class="[
+          entry.source === 'user' ? 'user' : 'response',
+          getMessageAlignment(index),
+        ]"
+        :style="{
+          color: getTextColor(entry.source),
+          backgroundColor: 'darkgray',
         }"
       >
         {{ entry.text }}
       </li>
     </ul>
-    <input
-      v-model="userInput"
-      @keyup.enter="sendPrompt"
-      placeholder="Type a message..."
-      :disabled="isLoading"
-    />
-    <button @click="sendPrompt" :disabled="isLoading">Send</button>
-    <button @click="clearConversation" :disabled="isLoading">Clear</button>
+    <div>
+      <input
+        class="input-message"
+        v-model="userInput"
+        @keyup.enter="sendPrompt"
+        placeholder="Type a message..."
+        :disabled="isLoading"
+      />
+    </div>
+    <div>
+      <button
+        @click="sendPrompt"
+        :disabled="isLoading || autoMode"
+        style="margin-right: 5px"
+      >
+        Send
+      </button>
+      <button @click="clearConversation" :disabled="isLoading || autoMode">
+        Clear
+      </button>
+    </div>
+    <button
+      @click="startAutomaticMode"
+      :disabled="isLoading || autoMode"
+      style="margin-right: 5px"
+    >
+      Start Automatic Mode
+    </button>
+    <button @click="stopAutomaticMode" :disabled="!autoMode">
+      Stop Automatic Mode
+    </button>
     <div v-if="isLoading" class="spinner"></div>
-    <!-- Spinner shown when loading -->
   </div>
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, nextTick } from "vue";
 import axios from "axios";
+import { personalityDetails } from "../data/personalities";
+import { generateInstructions } from "../data/functions";
 
 const conversationHistory = ref([]);
 const userInput = ref("");
 const responseMode = ref("normalo");
+const conversationalAtmosphere = ref("normal");
 const isLoading = ref(false);
-
-// Updated common instructions with a placeholder for the name
-const commonInstructions = `
-Before you answer, control your name and the character that you are assuming. 
-You can also find your name at the beginning of the chat within the brackets [{{name}}], 
-and so can you see which other chats correspond to you. 
-Add at the beginning of your response your name between brackets [{{name}}] so we can differentiate your answers. 
-All the chats that belong to you are your conversations, 
-and if other responses have other names, take them as they would be from another AIs and you can talk or discuss with them. 
-When I write you, I am none of the other characters, I am just the user that is writing.
-Try to make not so long answers, shorter is better.
-Constraint: you can use a maximum of 100 characters on your answer. And dont overanswer, just keep on a normal lenght.
-`;
-
-const personalityDetails = {
-  normalo: { name: "Normalo", additionalInstructions: "" },
-  erbsenzaehler: {
-    name: "Erbsenzähler",
-    additionalInstructions:
-      "You are an assistant that helps clarify information. When presented with a question, provide partial answers if the question is not clear enough to give a definitive answer. Limit your responses to small parts of the information until the user refines their prompt. Offer no more than 10 partial answers before providing the full answer and an example of how the question could have been asked more clearly. Speak in a robotic tone reminiscent of old movies, using formal language and a methodical approach to each inquiry.",
-  },
-  faul: {
-    name: "Faul",
-    additionalInstructions:
-      "You will only answer with the first answer that you find without exploring too much. When presented with a question, don't provide any extra explanation or text, only the first answer that comes to you. Limit your responses to a simple answer. Speak in a very cold and distant way, don't be friendly at all or provide any extra context.",
-  },
-  kreativo: {
-    name: "Kreativo",
-    additionalInstructions:
-      "You will be very creative with your answers, you can pick the first answer that gets to you but be very creative while finding it and you can also alucinate, but your answer has to still be related to the question, so the user is able to follow your idea. You can use any kind of imagination you know, and you will talk like a snob artist from new york city that loves Lady Gaga and Andy Warhol. But you have to keep your answers not so long.",
-  },
-  donGiovanni: {
-    name: "Don Giovanni",
-    additionalInstructions:
-      "You will be the typic casanova personality like Don Giovanni. You can lie all the time if you want to, but you have to answer in a very manipulative and romantic way to persuade the user to believe you. That is your goal, to lie in a way that the user feels you are telling the truth.",
-  },
-  bateman: {
-    name: "Bateman",
-    additionalInstructions:
-      "You are a real psychopath. Not only in a funny way, but in a real aggressive and dangerous way. Feel inspired from Patrick Bateman from american psycho. The conversations with you are serious, this is no friendly kindly place. You can also take some inspiration from Hannibal Lecter. ",
-  },
-  random: {
-    name: "Random",
-    additionalInstructions:
-      "At the begining of the first chat you will generate your own personality and a name for you. Your fixed name is Random, but you will not refer to yourself as Random, you will generate a complete new name, dont use famouse peoples names, have your own personality and be creativ for that. Keep that personality though all the conversation. There are no constraints about the personality you will create, you can be whatever thing you want to generate, so be creativ and dont use the 'known personalities', feel free. On your first chat of the whole conversation you will tell your created name and your personality, so you can check that information every time in the history. Constraints: dont use names or personalities from any known fictional or real character, god or person.",
-  },
-};
-
-// Function to generate full instructions for a personality
-function generateInstructions(personality) {
-  return (
-    commonInstructions.replace(
-      /\{\{name\}\}/g,
-      personalityDetails[personality].name
-    ) +
-    " " +
-    personalityDetails[personality].additionalInstructions
-  );
-}
+const autoMode = ref(false);
+const previousSpeaker = ref(null);
 
 const sendPrompt = async () => {
   isLoading.value = true;
-  const selectedPersonality = responseMode.value;
-  const fullInstructions = generateInstructions(selectedPersonality);
+  const selectedPersonality = autoMode.value
+    ? selectRandomPersonality()
+    : responseMode.value;
+  const lastText =
+    conversationHistory.value.length > 0 && autoMode.value
+      ? conversationHistory.value.slice(-1)[0].text
+      : conversationHistory.value.length === 0 && autoMode.value
+      ? "[Activated Rule: discuss with each other] " + userInput.value
+      : userInput.value;
 
-  const fullPrompt = `${fullInstructions}\n${conversationHistory.value
-    .map((item) => item.text)
-    .join("\n")}\n${userInput.value}`;
+  if (!autoMode.value && lastText.includes(userInput.value)) {
+    conversationHistory.value.push({ text: lastText, source: "user" });
+  }
+
+  const fullPrompt = generateInstructions(
+    selectedPersonality,
+    lastText,
+    conversationHistory.value,
+    conversationalAtmosphere.value
+  );
 
   try {
+    // console.log(fullPrompt);
     const response = await axios.post("http://localhost:11434/api/generate", {
       model: "llama3",
       prompt: fullPrompt,
       stream: false,
     });
-
-    if (response.data && response.data.response) {
-      conversationHistory.value.push({ text: userInput.value, source: "user" });
-      conversationHistory.value.push({
-        text: response.data.response,
-        source: "response",
-      });
+    processResponse(response, selectedPersonality);
+    if (autoMode.value) {
+      await nextTick();
+      setTimeout(sendPrompt, 1000);
     }
-    userInput.value = "";
   } catch (error) {
     console.error("Error sending prompt:", error);
+  } finally {
+    isLoading.value = false;
   }
+};
+
+function getMessageAlignment(index) {
+  return index % 2 === 0 ? "left-align" : "right-align";
+}
+
+function getTextColor(source) {
+  return source === "response" ? "purple" : "white";
+}
+
+function processResponse(response, personality) {
+  if (response.data && response.data.response) {
+    conversationHistory.value.push({
+      text: `${response.data.response}`,
+      source: "response",
+    });
+  }
+}
+
+function selectRandomPersonality() {
+  let options = Object.keys(personalityDetails).filter(
+    (p) => p !== previousSpeaker.value
+  );
+  previousSpeaker.value = options[Math.floor(Math.random() * options.length)];
+  return previousSpeaker.value;
+}
+
+const startAutomaticMode = () => {
+  if (!userInput.value && conversationHistory.value.length === 0) {
+    alert("Please enter a message to start the automatic mode.");
+    return;
+  }
+  autoMode.value = true;
+  sendPrompt();
+};
+
+const stopAutomaticMode = () => {
+  autoMode.value = false;
   isLoading.value = false;
 };
 
 const clearConversation = () => {
   conversationHistory.value = [];
   userInput.value = "";
+  autoMode.value = false;
+  isLoading.value = false;
 };
 </script>
 
 <style scoped>
 .chat-window {
-  max-width: 500px;
+  max-width: 900px;
   margin: auto;
   padding: 20px;
   border: 1px solid #ccc;
@@ -186,13 +272,69 @@ const clearConversation = () => {
 ul {
   margin-bottom: 10px;
 }
-.user {
-  color: red;
+.chat-messages {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
 }
-.response {
+
+.chat-message {
+  padding: 10px 20px;
+  margin-bottom: 8px;
+  border-radius: 20px;
+  max-width: 80%;
+  word-wrap: break-word;
+}
+
+/* .user {
+  background-color: red;
   color: white;
+}
+
+.response {
+  background-color: blue;
+  color: white;
+} */
+
+.left-align {
+  margin-right: auto; /* Align to left */
+  text-align: left;
+}
+
+.right-align {
+  margin-left: auto; /* Align to right */
+  text-align: right;
+}
+
+.user,
+.response {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* Subtle shadow */
 }
 button {
   margin-top: 10px;
+}
+
+.input-message {
+  width: 100%; /* Full width of its container */
+  padding: 12px 20px; /* Top and bottom padding, left and right padding */
+  margin: 8px 0; /* Margin top and bottom */
+  display: inline-block; /* Takes up the full line */
+  border: 1px solid #ccc; /* Light grey border */
+  border-radius: 4px; /* Rounded borders */
+  box-sizing: border-box; /* Box sizing border-box */
+  font-size: 16px; /* Larger font size */
+  font-family: Arial, sans-serif; /* Font family */
+}
+
+.input-message:focus {
+  border-color: #4a90e2; /* Blue border on focus */
+  outline: none; /* Removes the default focus outline */
+}
+
+/* Style for the placeholder */
+::placeholder {
+  /* Chrome, Firefox, Opera, Safari 10.1+ */
+  color: #888; /* Gray text */
+  opacity: 1; /* Fully opaque (not transparent) */
 }
 </style>
