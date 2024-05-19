@@ -6,28 +6,28 @@
         <input type="radio" value="normalo" v-model="responseMode" /> Normalo
       </label>
       <label>
-        <input type="radio" value="erbsenzaehler" v-model="responseMode" />
-        Erbsenzähler
+        <input type="radio" value="profesor" v-model="responseMode" />
+        Profesor
       </label>
       <label>
-        <input type="radio" value="faul" v-model="responseMode" />
-        Faul
+        <input type="radio" value="drago" v-model="responseMode" />
+        Drago
       </label>
       <label>
         <input type="radio" value="kreativa" v-model="responseMode" />
         Kreativa
       </label>
       <label>
-        <input type="radio" value="donGiovanni" v-model="responseMode" />
-        Don Giovanni
+        <input type="radio" value="frank" v-model="responseMode" />
+        Frank
       </label>
       <label>
         <input type="radio" value="bateman" v-model="responseMode" />
         Bateman
       </label>
       <label>
-        <input type="radio" value="catWoman" v-model="responseMode" />
-        Cat Woman
+        <input type="radio" value="salander" v-model="responseMode" />
+        Salander
       </label>
       <label>
         <input type="radio" value="random" v-model="responseMode" />
@@ -89,7 +89,7 @@
         Disrespectful
       </label>
     </div>
-    <ul class="chat-messages">
+    <ul class="chat-messages" ref="messagesContainer">
       <li
         v-for="(entry, index) in conversationHistory"
         :key="index"
@@ -142,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from "vue";
+import { ref, nextTick, watch } from "vue";
 import axios from "axios";
 import { personalityDetails } from "../data/personalities";
 import { generateInstructions } from "../data/functions";
@@ -155,22 +155,50 @@ const isLoading = ref(false);
 const autoMode = ref(false);
 const previousSpeaker = ref(null);
 
+const messagesContainer = ref(null);
+
+watch(conversationHistory, () => {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    }
+  });
+});
+
 const sendPrompt = async () => {
   isLoading.value = true;
   const selectedPersonality = autoMode.value
     ? selectRandomPersonality()
     : responseMode.value;
+
   const lastText =
     conversationHistory.value.length > 0 && autoMode.value
       ? conversationHistory.value.slice(-1)[0].text
       : conversationHistory.value.length === 0 && autoMode.value
-      ? "[Activated Rule: discuss with each other] " + userInput.value
+      ? "[Activated Rule: discuss with each other following this context]: " +
+        userInput.value
       : userInput.value;
 
-  if (!autoMode.value && lastText.includes(userInput.value)) {
-    conversationHistory.value.push({ text: lastText, source: "user" });
+  if (userInput.value) {
+    conversationHistory.value.push({
+      text: lastText.replace(/["']/g, ""),
+      source: "user",
+      done: true, // Mark user input as complete
+    });
+    userInput.value = ""; // Clear the user input field after adding to history
   }
 
+  // if (!autoMode.value && lastText.includes(userInput.value)) {
+  //   conversationHistory.value.push({ text: lastText, source: "user" });
+  // }
+
+  // if (!autoMode.value && lastText === userInput.value) {
+  //   conversationHistory.value.push({ text: lastText, source: "user" });
+  // } else if (autoMode.value && conversationHistory.value.length == 0) {
+  //   conversationHistory.value.push({ text: lastText, source: "user" });
+  // }
+
+  // console.log(conversationHistory.value);
   const fullPrompt = generateInstructions(
     selectedPersonality,
     lastText,
@@ -179,21 +207,88 @@ const sendPrompt = async () => {
   );
 
   try {
-    // console.log(fullPrompt);
-    const response = await axios.post("http://localhost:11434/api/generate", {
-      model: "llama3",
-      prompt: fullPrompt,
-      stream: false,
+    console.log(fullPrompt);
+    const response = await fetch("http://localhost:11434/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama3",
+        prompt: fullPrompt,
+        stream: true,
+      }),
     });
-    processResponse(response, selectedPersonality);
+
+    const reader = response.body.getReader();
+    let partialData = "";
+    let currentStreamText = ""; // Used to hold ongoing streamed text
+
+    const processChunk = (value) => {
+      partialData += new TextDecoder("utf-8").decode(value, { stream: true });
+      try {
+        let lastNewlineIndex = partialData.lastIndexOf("\n");
+        if (lastNewlineIndex !== -1) {
+          let completeMessages = partialData.slice(0, lastNewlineIndex);
+          partialData = partialData.slice(lastNewlineIndex + 1);
+
+          completeMessages.split("\n").forEach((message) => {
+            if (message.trim()) {
+              const data = JSON.parse(message);
+              if (data.response !== undefined) {
+                currentStreamText += data.response;
+                // Update the last entry or create a new one if none exists
+                if (
+                  conversationHistory.value.length > 0 &&
+                  !conversationHistory.value.at(-1).done
+                ) {
+                  conversationHistory.value.at(-1).text = currentStreamText;
+                } else {
+                  conversationHistory.value.push({
+                    text: currentStreamText.replace(/["']/g, ""),
+                    source: selectedPersonality,
+                    done: false,
+                  });
+                }
+                if (data.done) {
+                  conversationHistory.value.at(-1).done = true;
+                  currentStreamText = ""; // Reset for next message
+                  if (conversationHistory.length > 10) {
+                    // If it exceeds, remove the oldest message
+                    conversationHistory.shift();
+                  }
+                }
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.error("Error parsing JSON:", err);
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        isLoading.value = false;
+        break;
+      }
+      processChunk(value);
+    }
+
+    // Handle any remaining partial data
+    if (partialData) {
+      processChunk(new TextEncoder().encode(partialData));
+      partialData = "";
+    }
+  } catch (error) {
+    console.error("Error during streaming:", error);
+  } finally {
+    isLoading.value = false;
     if (autoMode.value) {
       await nextTick();
       setTimeout(sendPrompt, 1000);
     }
-  } catch (error) {
-    console.error("Error sending prompt:", error);
-  } finally {
-    isLoading.value = false;
   }
 };
 
@@ -202,24 +297,52 @@ function getMessageAlignment(index) {
 }
 
 function getTextColor(source) {
-  return source === "response" ? "purple" : "white";
+  return source === "user" ? "white" : "purple";
 }
 
 function processResponse(response, personality) {
   if (response.data && response.data.response) {
     conversationHistory.value.push({
       text: `${response.data.response}`,
-      source: "response",
+      source: personality.name,
     });
   }
 }
 
+// function selectRandomPersonality() {
+//   let options = Object.keys(personalityDetails).filter(
+//     (p) => p !== previousSpeaker.value
+//   );
+//   previousSpeaker.value = options[Math.floor(Math.random() * options.length)];
+//   return previousSpeaker.value;
+// }
+
 function selectRandomPersonality() {
+  // Analyze conversation history to determine which personalities have contributed recently
+  let recentContributors = new Set();
+  conversationHistory.value.forEach((entry) => {
+    if (entry.source && entry.source !== previousSpeaker.value) {
+      recentContributors.add(entry.source);
+    }
+  });
+
+  // Filter personalities based on recent contributions and select from remaining options
   let options = Object.keys(personalityDetails).filter(
-    (p) => p !== previousSpeaker.value
+    (p) => p !== previousSpeaker.value && !recentContributors.has(p)
   );
-  previousSpeaker.value = options[Math.floor(Math.random() * options.length)];
-  return previousSpeaker.value;
+
+  // If no options remain, fall back to random selection
+  if (options.length === 0) {
+    options = Object.keys(personalityDetails).filter(
+      (p) => p !== previousSpeaker.value
+    );
+  }
+
+  // Randomly select the next personality
+  const nextPersonality = options[Math.floor(Math.random() * options.length)];
+  previousSpeaker.value = nextPersonality;
+
+  return nextPersonality;
 }
 
 const startAutomaticMode = () => {
